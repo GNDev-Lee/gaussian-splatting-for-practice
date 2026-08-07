@@ -414,6 +414,10 @@ class GaussianModel:
         selected_pts_mask = torch.where(padded_grad >= grad_threshold, True, False)
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values > self.percent_dense*scene_extent)
+        # --- 확인용 코드 추가 ---
+        split_count = selected_pts_mask.sum().item()
+        print(f" 분할(Split)된 원본 가우시안 개수: {split_count} (이것이 2배로 쪼개짐)")
+        # ------------------------
 
         stds = self.get_scaling[selected_pts_mask].repeat(N,1)
         means =torch.zeros((stds.size(0), 3),device="cuda")
@@ -437,6 +441,11 @@ class GaussianModel:
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
+
+        # --- 확인용 코드 추가 ---
+        cloned_count = selected_pts_mask.sum().item()
+        print(f" 복제(Clone)된 가우시안 개수: {cloned_count}")
+        # ------------------------
         
         new_xyz = self._xyz[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask]
@@ -450,12 +459,15 @@ class GaussianModel:
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_tmp_radii)
 
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, radii):
+        print(f"--- 증식 전 총 가우시안: {self.get_xyz.shape[0]} ---")
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
 
         self.tmp_radii = radii
         self.densify_and_clone(grads, max_grad, extent)
+        print(f"Clone 직후 총 가우시안: {self.get_xyz.shape[0]}")
         self.densify_and_split(grads, max_grad, extent)
+        print(f"Split 직후 총 가우시안: {self.get_xyz.shape[0]}")
 
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if max_screen_size:
@@ -463,6 +475,7 @@ class GaussianModel:
             big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
             prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
         self.prune_points(prune_mask)
+        print(f"Prune 직후 최종 가우시안: {self.get_xyz.shape[0]}")
         tmp_radii = self.tmp_radii
         self.tmp_radii = None
 
